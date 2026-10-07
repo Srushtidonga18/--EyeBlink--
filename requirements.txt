@@ -1,0 +1,12 @@
+opencv-python
+mediapipe
+numpy
+pandas
+scikit-learn
+pygame
+joblib
+matplotlib
+seaborn
+streamlit
+pyarrow==17.0.0
+protobuf>=4.25.3,<5
