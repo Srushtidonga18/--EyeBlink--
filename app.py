@@ -8,8 +8,11 @@ import pygame
 import time
 import os
 import sqlite3
+import urllib.request
 from collections import deque
 from sklearn.metrics import classification_report, accuracy_score
+from mediapipe.tasks import python as mp_python
+from mediapipe.tasks.python import vision as mp_vision
 from db.db_config import log_alert, init_db, SQLITE_PATH, get_logs_dataframe
 
 # =====================================================================
@@ -103,6 +106,11 @@ st.markdown("""
         border-radius: 16px;
         padding: 22px 24px;
         text-align: center;
+        height: 140px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        overflow: hidden;
         box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
         backdrop-filter: blur(10px);
         transition: transform 0.2s ease, border-color 0.2s ease;
@@ -197,10 +205,26 @@ def load_system():
         except Exception:
             pass
 
-    mp_face = mp.solutions.face_mesh
-    return model, alarm, mp_face
+    # MediaPipe 1.x Tasks API — download the FaceLandmarker model if needed
+    task_model_path = 'models/face_landmarker.task'
+    if not os.path.exists(task_model_path):
+        os.makedirs('models', exist_ok=True)
+        urllib.request.urlretrieve(
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
+            task_model_path
+        )
 
-model, alarm_sound, mp_face = load_system()
+    base_options = mp_python.BaseOptions(model_asset_path=task_model_path)
+    face_landmarker_options = mp_vision.FaceLandmarkerOptions(
+        base_options=base_options,
+        output_face_blendshapes=False,
+        output_facial_transformation_matrixes=False,
+        num_faces=1,
+        running_mode=mp_vision.RunningMode.VIDEO
+    )
+    return model, alarm, face_landmarker_options
+
+model, alarm_sound, face_landmarker_options = load_system()
 
 @st.cache_data
 def get_dynamic_evaluation():
@@ -250,18 +274,11 @@ def calculate_mor(pts):
 # =====================================================================
 # 3. TOP BRAND BAR (NO EMOJIS, CLEAN NEON)
 # =====================================================================
-acc_badge_str = f"RFC MODEL: {dynamic_acc:.2f}% ACCURACY" if dynamic_acc > 0 else "RFC MODEL ONLINE"
-
-st.markdown(f"""
+st.markdown("""
 <div class="top-brand-bar">
     <div>
-        <div class="brand-title">GUARDIAN EYE // ADAS COCKPIT</div>
+        <div class="brand-title">EyeBlink</div>
         <div class="brand-subtitle">Smart Real-Time Driver Drowsiness & Fatigue Monitoring System</div>
-    </div>
-    <div>
-        <span style="background: rgba(0, 242, 254, 0.12); border: 1px solid #00F2FE; color: #00F2FE; padding: 8px 18px; border-radius: 20px; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; box-shadow: 0 0 15px rgba(0, 242, 254, 0.25);">
-            {acc_badge_str}
-        </span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -316,15 +333,13 @@ if selected_nav == "Live Cockpit Monitor":
 
     st.write("")
 
-    ctrl_col1, ctrl_col2, ctrl_col3 = st.columns([4, 4, 4])
+    ctrl_col1, ctrl_col2 = st.columns([4, 4])
     with ctrl_col1:
         run_camera = st.toggle("ENGAGE LIVE MONITORING", value=False)
     with ctrl_col2:
         audio_alert_enabled = st.toggle("Audio Siren Alarm", value=True)
-    with ctrl_col3:
-        sensitivity = st.select_slider("Sensitivity Threshold", options=["Low (0.16)", "Balanced (0.20)", "High (0.24)"], value="Balanced (0.20)")
 
-    ear_threshold = 0.16 if "Low" in sensitivity else (0.24 if "High" in sensitivity else 0.20)
+    ear_threshold = 0.20
     consec_thresh = 15
 
     if not run_camera:
@@ -364,7 +379,8 @@ if selected_nav == "Live Cockpit Monitor":
         alarm_playing = False
         LABELS = {0: 'ACTIVE', 1: 'DROWSY', 2: 'YAWNING'}
 
-        with mp_face.FaceMesh(max_num_faces=1, refine_landmarks=True) as fm:
+        with mp_vision.FaceLandmarker.create_from_options(face_landmarker_options) as fm:
+            frame_index = 0
             while run_camera:
                 ret, frame = cap.read()
                 if not ret:
@@ -373,15 +389,17 @@ if selected_nav == "Live Cockpit Monitor":
 
                 h, w, _ = frame.shape
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                res = fm.process(rgb)
+                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                timestamp_ms = int(time.time() * 1000)
+                res = fm.detect_for_video(mp_image, timestamp_ms)
 
                 status_str = "ACTIVE"
                 conf = 0.95
                 avg_ear, l_ear, r_ear, mor = 0.30, 0.30, 0.30, 0.20
                 curr_t = time.time()
 
-                if res.multi_face_landmarks:
-                    pts = np.array([(p.x * w, p.y * h) for p in res.multi_face_landmarks[0].landmark])
+                if res.face_landmarks:
+                    pts = np.array([(lm.x * w, lm.y * h) for lm in res.face_landmarks[0]])
                     l_ear = calculate_ear(pts, LEFT_EYE)
                     r_ear = calculate_ear(pts, RIGHT_EYE)
                     avg_ear = (l_ear + r_ear) / 2.0
@@ -478,11 +496,13 @@ if selected_nav == "Live Cockpit Monitor":
                     - **Closed Frame Buffer:** `{consecutive_closed}/{consec_thresh}`
                     """)
 
+                frame_index += 1
                 time.sleep(0.03)
 
         if alarm_playing and alarm_sound:
             alarm_sound.stop()
         cap.release()
+
 
 # =====================================================================
 # 6. VIEW: INCIDENT LOGS & AUDIT TRAIL
@@ -502,10 +522,33 @@ elif selected_nav == "Incident Logs & Audit":
         yawn_ev = (logs_df['status'] == 'YAWNING').sum()
         avg_conf = logs_df['confidence'].mean() * 100
 
-        col1.metric("Total Events Logged", total_ev)
-        col2.metric("Drowsy Events", drowsy_ev, f"{(drowsy_ev/total_ev)*100:.1f}%")
-        col3.metric("Yawn Events", yawn_ev, f"{(yawn_ev/total_ev)*100:.1f}%")
-        col4.metric("Avg Detection Conf", f"{avg_conf:.1f}%")
+        col1.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Total Events Logged</div>
+            <div class="cockpit-card-value" style="color: #00F2FE;">{total_ev}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col2.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Drowsy Events</div>
+            <div class="cockpit-card-value" style="color: #FF1744;">{drowsy_ev} <span style="font-size: 16px; color: #94A3B8;">{(drowsy_ev/total_ev)*100:.1f}%</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col3.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Yawn Events</div>
+            <div class="cockpit-card-value" style="color: #FFD600;">{yawn_ev} <span style="font-size: 16px; color: #94A3B8;">{(yawn_ev/total_ev)*100:.1f}%</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        col4.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Avg Detection Conf</div>
+            <div class="cockpit-card-value" style="color: #00FF87;">{avg_conf:.1f}%</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.divider()
 
@@ -546,11 +589,37 @@ elif selected_nav == "Telemetry & Analytics":
         safety_score = max(0, 100 - (drowsy_count * 4) - (yawn_count * 2))
         risk_level = "LOW RISK (SAFE)" if safety_score >= 80 else ("MODERATE RISK" if safety_score >= 50 else "CRITICAL FATIGUE")
 
-        ds_col1, ds_col2, ds_col3, ds_col4 = st.columns(4)
-        ds_col1.metric("Driver Safety Score", f"{safety_score} / 100", f"{risk_level}")
-        ds_col2.metric("Recorded Drowsiness Triggers", f"{drowsy_count} times")
-        ds_col3.metric("Recorded Yawning Triggers", f"{yawn_count} times")
-        ds_col4.metric("Average Trigger EAR", f"{logs_df['ear_value'].mean():.3f}")
+        risk_color = "#00FF87" if safety_score >= 80 else ("#FFD600" if safety_score >= 50 else "#FF1744")
+
+        ds_col1, ds_col2, ds_col3, ds_col4 = st.columns([3, 2, 2, 2])
+        ds_col1.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Driver Safety Score</div>
+            <div class="cockpit-card-value" style="color: {risk_color};">{safety_score} / 100</div>
+            <div style="font-size: 13px; font-weight: 700; color: {risk_color}; margin-top: 4px;">{risk_level}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        ds_col2.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Recorded Drowsiness Triggers</div>
+            <div class="cockpit-card-value" style="color: #FF1744;">{drowsy_count} times</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        ds_col3.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Recorded Yawning Triggers</div>
+            <div class="cockpit-card-value" style="color: #FFD600;">{yawn_count} times</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        ds_col4.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Average Trigger EAR</div>
+            <div class="cockpit-card-value" style="color: #00F2FE;">{logs_df['ear_value'].mean():.3f}</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.write("")
         chart_col1, chart_col2 = st.columns(2)
@@ -566,10 +635,37 @@ elif selected_nav == "Telemetry & Analytics":
     st.markdown("#### 2. Live Machine Learning Model Metrics")
     if dataset_df is not None:
         m_c1, m_c2, m_c3, m_c4 = st.columns(4)
-        m_c1.metric("Live Model Accuracy", f"{dynamic_acc:.2f}%", "Computed on CSV")
-        m_c2.metric("Dataset Sample Size", f"{len(dataset_df):,} rows", "Kaggle + Custom")
-        m_c3.metric("Decision Trees", f"{model.n_estimators} Trees", "Random Forest")
-        m_c4.metric("Drowsy Precision", f"{dynamic_report['DROWSY (1)']['precision']*100:.1f}%", "High Confidence")
+        m_c1.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Live Model Accuracy</div>
+            <div class="cockpit-card-value" style="color: #00FF87;">{dynamic_acc:.2f}%</div>
+            <div style="font-size: 13px; font-weight: 600; color: #94A3B8; margin-top: 4px;">Computed on CSV</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        m_c2.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Dataset Sample Size</div>
+            <div class="cockpit-card-value" style="color: #00F2FE;">{len(dataset_df):,} rows</div>
+            <div style="font-size: 13px; font-weight: 600; color: #94A3B8; margin-top: 4px;">Kaggle + Custom</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        m_c3.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Decision Trees</div>
+            <div class="cockpit-card-value" style="color: #FFFFFF;">{model.n_estimators} Trees</div>
+            <div style="font-size: 13px; font-weight: 600; color: #94A3B8; margin-top: 4px;">Random Forest</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        m_c4.markdown(f"""
+        <div class="cockpit-card">
+            <div class="cockpit-card-title">Drowsy Precision</div>
+            <div class="cockpit-card-value" style="color: #FFD600;">{dynamic_report['DROWSY (1)']['precision']*100:.1f}%</div>
+            <div style="font-size: 13px; font-weight: 600; color: #94A3B8; margin-top: 4px;">High Confidence</div>
+        </div>
+        """, unsafe_allow_html=True)
 
         st.write("")
         st.markdown("##### Dynamic Feature Importance (What Influenced Predictions Most?)")
