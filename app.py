@@ -486,7 +486,7 @@ if selected_nav == "Live Cockpit Monitor":
                 </div>
                 """, unsafe_allow_html=True)
 
-                video_feed_placeholder.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", use_container_width=True)
+                video_feed_placeholder.image(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), channels="RGB", width="stretch")
 
                 if ear_history:
                     chart_placeholder.line_chart(list(ear_history), height=200)
@@ -565,10 +565,10 @@ elif selected_nav == "Incident Logs & Audit":
                 data=display_df.to_csv(index=False).encode('utf-8'),
                 file_name="driver_fatigue_audit_logs.csv",
                 mime="text/csv",
-                use_container_width=True
+                width="stretch"
             )
 
-        st.dataframe(display_df, use_container_width=True, height=380)
+        st.dataframe(display_df, width="stretch", height=380)
 
 # =====================================================================
 # 7. VIEW: 100% DYNAMIC TELEMETRY & ML ANALYTICS
