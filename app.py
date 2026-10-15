@@ -288,7 +288,7 @@ st.markdown("""
 # =====================================================================
 selected_nav = st.radio(
     label="Navigation",
-    options=["Live Cockpit Monitor", "Incident Logs & Audit", "Telemetry & Analytics", "System Architecture"],
+    options=["Live Cockpit Monitor", "Incident Logs & Audit", "Telemetry & Analytics"],
     horizontal=True,
     label_visibility="collapsed"
 )
@@ -727,19 +727,3 @@ elif selected_nav == "Telemetry & Analytics":
 
     else:
         st.warning("No dataset CSV found to compute evaluation metrics.")
-
-# =====================================================================
-# 8. VIEW: SYSTEM ARCHITECTURE
-# =====================================================================
-else:
-    st.markdown("### System Architecture & Syllabus Alignment")
-    st.markdown("""
-    **Department of Data Science — Python for Data Science (PDS 2026-27)**
-    
-    This Smart Driver Drowsiness & Fatigue Monitoring System integrates:
-    1. **MediaPipe 3D Face Mesh:** Real-time tracking of 468 facial points for 3D Euclidean EAR & MOR computation.
-    2. **Machine Learning Pipeline:** Scikit-Learn `RandomForestClassifier` trained with 100 decision trees.
-    3. **Audio-Visual Alarm Engine:** Pygame hardware audio buffer with continuous emergency siren looping.
-    4. **Relational Logging:** Local SQLite embedded database tracking driver safety telemetry.
-    """)
-    st.success("System verified and production-ready.")
