@@ -693,9 +693,8 @@ elif selected_nav == "Telemetry & Analytics":
 
         st.divider()
 
-        # SECTION 3: EXPLORATORY DATA ANALYSIS (EDA) & DESCRIPTIVE STATS (Syllabus Module 2)
+        # SECTION 3: EXPLORATORY DATA ANALYSIS (EDA) & DESCRIPTIVE STATS
         st.markdown("#### 3. Exploratory Data Analysis & Descriptive Statistics")
-        st.caption("Central tendency, dispersion, and feature correlation directly fulfilling Syllabus Module 2.")
 
         eda_c1, eda_c2 = st.columns([6, 5])
         with eda_c1:
