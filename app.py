@@ -622,13 +622,20 @@ elif selected_nav == "Telemetry & Analytics":
         """, unsafe_allow_html=True)
 
         st.write("")
-        chart_col1, chart_col2 = st.columns(2)
+        chart_col1, chart_col2 = st.columns([1, 1])
         with chart_col1:
             st.markdown("##### Incident Type Distribution")
             st.bar_chart(logs_df['status'].value_counts())
         with chart_col2:
-            st.markdown("##### EAR Severity Spread on Incidents")
-            st.line_chart(logs_df['ear_value'].head(50))
+            st.markdown("##### Telemetry Audit Summary")
+            st.markdown(f"""
+            <div style="background: rgba(14, 22, 38, 0.7); border: 1px solid rgba(0, 242, 254, 0.15); border-radius: 12px; padding: 18px 22px; font-size: 15px; line-height: 1.8;">
+                <div>* <strong>Total Recorded Incidents:</strong> <span style="color: #00F2FE; font-weight: 700;">{len(logs_df)}</span></div>
+                <div>* <strong>Critical Drowsiness Ratio:</strong> <span style="color: #FF1744; font-weight: 700;">{(drowsy_count / len(logs_df) * 100):.1f}%</span></div>
+                <div>* <strong>Early Fatigue Yawn Ratio:</strong> <span style="color: #FFD600; font-weight: 700;">{(yawn_count / len(logs_df) * 100):.1f}%</span></div>
+                <div>* <strong>Average Trigger Confidence:</strong> <span style="color: #00FF87; font-weight: 700;">{(logs_df['confidence'].mean() * 100):.1f}%</span></div>
+            </div>
+            """, unsafe_allow_html=True)
 
     st.divider()
 
@@ -668,7 +675,7 @@ elif selected_nav == "Telemetry & Analytics":
         """, unsafe_allow_html=True)
 
         st.write("")
-        st.markdown("##### Dynamic Feature Importance (What Influenced Predictions Most?)")
+        st.markdown("##### Dynamic Feature Importance")
         st.bar_chart(dynamic_feat_imp.set_index('Feature'))
 
         st.markdown("##### Live Classification Report (Generated Dynamically via Scikit-Learn)")
@@ -683,6 +690,41 @@ elif selected_nav == "Telemetry & Analytics":
                     'Samples (Support)': int(dynamic_report[class_name]['support'])
                 })
         st.table(pd.DataFrame(report_rows))
+
+        st.divider()
+
+        # SECTION 3: EXPLORATORY DATA ANALYSIS (EDA) & DESCRIPTIVE STATS (Syllabus Module 2)
+        st.markdown("#### 3. Exploratory Data Analysis & Descriptive Statistics")
+        st.caption("Central tendency, dispersion, and feature correlation directly fulfilling Syllabus Module 2.")
+
+        eda_c1, eda_c2 = st.columns([6, 5])
+        with eda_c1:
+            st.markdown("##### Central Tendency & Dispersion by Class")
+            labels_map = {0: 'ACTIVE (0)', 1: 'DROWSY (1)', 2: 'YAWNING (2)'}
+            eda_df = dataset_df.copy()
+            eda_df['State'] = eda_df['label'].map(labels_map)
+            
+            summary_stats = []
+            for state_label in ['ACTIVE (0)', 'DROWSY (1)', 'YAWNING (2)']:
+                sub = eda_df[eda_df['State'] == state_label]
+                summary_stats.append({
+                    'Driver State': state_label,
+                    'EAR Mean': f"{sub['avg_ear'].mean():.3f}",
+                    'EAR Std': f"{sub['avg_ear'].std():.3f}",
+                    'EAR Min-Max': f"[{sub['avg_ear'].min():.2f} - {sub['avg_ear'].max():.2f}]",
+                    'MOR Mean': f"{sub['mor'].mean():.3f}",
+                    'MOR Std': f"{sub['mor'].std():.3f}",
+                    'MOR Min-Max': f"[{sub['mor'].min():.2f} - {sub['mor'].max():.2f}]"
+                })
+            st.table(pd.DataFrame(summary_stats))
+
+        with eda_c2:
+            st.markdown("##### Feature Correlation Matrix")
+            corr_matrix = dataset_df[['avg_ear', 'l_ear', 'r_ear', 'mor']].corr().round(3)
+            corr_matrix.columns = ['Avg EAR', 'Left EAR', 'Right EAR', 'Mouth (MOR)']
+            corr_matrix.index = ['Avg EAR', 'Left EAR', 'Right EAR', 'Mouth (MOR)']
+            st.table(corr_matrix)
+
     else:
         st.warning("No dataset CSV found to compute evaluation metrics.")
 
